@@ -1,6 +1,9 @@
 
 // Uses code examples from https://gist.github.com/hsiboy/11545fd0241ab60b567d for FastLED
 // Uses code examples from https://medium.com/@werneckpaiva/how-to-read-rc-signal-with-arduino-using-flysky-ibus-73448bc924eb for IBus
+// Uses blink without delay tutorial from https://forum.arduino.cc/index.php?topic=384198.0
+// help with millis - https://forum.arduino.cc/index.php?topic=568991.0
+// 
 
 #include <Arduino.h>
 #include <IBusBM.h>
@@ -18,9 +21,9 @@
 //#define MAX_HUE 255           // Maximum LED Hue
 //#define MIN_SATURATION 0      // Minimum LED Saturation for HSV
 //#define MAX_SATURATION 255    // Maximum LED Saturation for HSV
-#define MAX_SPEED 100         // Maximum Animation Speed (percentage)
+#define MAX_SPEED 1000         // Maximum Animation Speed (percentage)
 #define MIN_SPEED 1           // Minimum Animation Speed (percentage)
-#define STEP_SPEED 2          // Amount to increase/decrease speed each step (percent)
+#define STEP_SPEED 10          // Amount to increase/decrease speed each step (percent)
 #define LED_WIDTH 1           // Used to determine how many LEDs to use in animation movement
 #define CHASE_WIDTH 3         // Used to determine how wide the chase gap animation is
 
@@ -31,16 +34,25 @@ int valHue = 0;     //Hue
 int valSat = 0;     //Saturation
 int valWhite = 0;   //White
 int currBright= 100;  //Current Brightness
-int currAni;        //Current Animation Profile
+int currPattern;    //Current Animation Pattern
+//int currAni;        //Current Animation Profile
 int currColor;      //Current Color Profile
-int currSpeed;      //Current Animation Speed
+//int currSpeed;      //Current Animation Speed
 bool revDir = false;    //Reverse Direction
 bool midOut = false;    //Middle-Out
+int currSpeed = 50;    //Default value
+bool isReset = false;   //Reset animation flag
+
+uint32_t ColorProfiles[3];  // store color profile info
 
 // New vars for non-blocking patterns
 unsigned long pInterval = 20 ; // Default delay time between steps in the pattern (milliseconds)
-unsigned long lastUpdate = 0 ; // for millis() when last update occured
-unsigned long pIntervals [] = { 20, 20, 50, 100 } ; // Delay between steps for each pattern (milliseconds)
+// unsigned long lastUpdate = 0 ; // for millis() when last update occured
+ unsigned long pIntervals [] = { 20, 20, 50, 100 } ; // Delay between steps for each pattern (milliseconds)
+
+unsigned long currentTime = millis();  //the current value of millis()
+unsigned long patternChangeTime = 0; //time of the last change of pattern occured
+int patternTime;  // used to store the pattern's time frequency
 
 Adafruit_NeoPixel neoStrip = Adafruit_NeoPixel(NUM_LEDS, LED_PIN, NEO_RGBW + NEO_KHZ800);    // Init neoStrip NeoPixel Object
 
@@ -82,137 +94,130 @@ int readChannel(byte channelInput, int minLimit, int maxLimit, int defaultValue)
   return map(ch, 1000, 2000, minLimit, maxLimit);
 }
 
-
-///////////////////////////////////////////////////////////////////////////////////////////////////////////
-void loop() {
-   
-  //int valPattern = readChannel(1, 1000, 2000, 1000);  
-  //int valSpeed = readChannel(2, 1000, 2000, 1500);              // Channel 2 Right Stick (Up/Down)  
-
-  //int valHue = readChannel(5, 0, 255, 0);                    // Channel 5 Pot (VrA)
-  //int valSat = readChannel(6, MIN_SATURATION, MAX_SATURATION, MIN_SATURATION);      // Channel 6 Pot (VrB)
-  //int adjColor = readChannel(6, 0, 255, 100);      // Channel 6 Pot (VrB)
- 
- 
-
-  
-  
-  bool valLock = readChannel(8, false, true, 0);        // Channel 8 Switch (SwB)
-  if (valLock)
-    {
-    currBright = readChannel(6, 0, 255, 0);   // Channel 6 Pot (VrA)
-    neoStrip.setBrightness(currBright);
-    }
-  
-  /////////////    Increase or Decrease animation speed by percentage    /////////////
-  static int currSpeed = 50;    //Default value
-    
-  if (valSpeed > 1900 && currSpeed < MAX_SPEED)    //Increase the animation speed
-    {currSpeed = currSpeed + STEP_SPEED;
-    if(currSpeed > MAX_SPEED) currSpeed = MAX_SPEED;
-    delay(50);                                     // debounce delay
-    }
-  else if (valSpeed < 1100 && currSpeed > MIN_SPEED)     //Decrease the animation speed
-    {currSpeed = currSpeed + STEP_SPEED;
-    if(currSpeed <= 0) currSpeed = MIN_SPEED;
-    delay(50);                                     // debounce delay
-    }
-  //////////////////////////////
-
-  /////////////    Select pattern    /////////////
-  static int currPattern = 0;    //Default value
-  
-  if(valPattern > 1900)
-    {
-    currPattern++;                              // increase pattern number
-    if(currPattern > 4) currPattern = 0;        // wrap round if too high
-    pInterval = pIntervals[currPattern] * (currSpeed/100);        // set speed for this pattern
-    wipe();                                   // clear out the buffer
-    delay(100);                               // debounce delay
-    }
-  else if (valPattern < 1100)
-    {
-    currPattern--;                           // decrease pattern number
-    if(currPattern < 0) currPattern = 4;     // wrap round if too low
-    pInterval = pIntervals[currPattern] * (currSpeed/100);        // set speed for this pattern
-    wipe();                                  // clear out the buffer
-    delay(100);                              //debounce delay
-    }    
-  //////////////////////////////////////////////////////////////////////////////////////////
+// Input a value 0 to 255 to get a color value.
+// The colours are a transition r - g - b - back to r.
+uint32_t Wheel(byte WheelPos) {
+  WheelPos = 255 - WheelPos;
+  if(WheelPos < 85) {
+    return neoStrip.Color(255 - WheelPos * 3, 0, WheelPos * 3);
+  }
+  if(WheelPos < 170) {
+    WheelPos -= 85;
+    return neoStrip.Color(0, WheelPos * 3, 255 - WheelPos * 3);
+  }
+  WheelPos -= 170;
+  return neoStrip.Color(WheelPos * 3, 255 - WheelPos * 3, 0);
+}
 
 
-
-  ////////////////////////////// Standby / Resume //////////////////////////////
-  int valStandby = readChannel(7, 1000, 2000, 2000);    // Channel 7 Switch (SwA)
-  int setColor = readChannel(10, 1000, 2000, 1000);      // Channel 10 Switch (SwD) - Allows the color to be set
-  
-  if (valStandby > 1900 && setColor < 1900)    //Standby enabled
-    {
-    neoStrip.fill(0,0,NUM_LEDS);    //Turn off all LEDs
-    neoStrip.show();
-    delay(50);                                     // debounce delay
-    }
-  else if (valStandby < 1100 && setColor < 1900)     //Resume animation/display
-    {
-    
-    delay(50);                                     // debounce delay
-    }
-//////////////////////////////////////////////////////////////////////////////////////////
-
-/////////////////////////////// Set Color Profile ///////////////////////////////
-if (setColor > 1900)
-  {
-
+void rainbow() { // modified from Adafruit example to make it a state machine
+  static uint16_t j=0;
+  if(isReset) {
+    j=0; 
+    isReset=false;   //Resets the animation 
   }
 
-
-
-///////////////////////////////////////////////
-
-/////////////////Ignore for now
-
-  // Color Palette Selection
-  switch (currPattern) {
-    case 0:   // Solid  
-  
-    case 1:   // Color Wipe
-        colorWipe(Wheel(valHue), valSpeed, valBright, revDir);    //Wipe color
-        colorWipe(neoStrip.Color(0,0,0), valSpeed, valBright, revDir);    //Wipe black
-      break;
-      
-    case 2:
-      // Chase
-      // rainbow cycle here
-      break;
-      
-    case 3:      // Larson Scanner Animation 
-      if (enableMidOut)   // Use middle out animation order
-        {    
-        // run larson scanner w/middle out
-        }
-
-       else   // Use left/right animation order
-        {
-        // run larson scanner
-        }
-      break;
-    }  
-
-
-// --- Debugging example below --- 
-//  for (byte i = 1; i<=10; i++){
-//    int value = readChannel(i, 1000, 2000, 1000);
-//    debugSerial.print("Ch");
-//    debugSerial.print(i);
-//    debugSerial.print(": ");
-//    debugSerial.print(value);
-//    debugSerial.print(" ");
-//  }
-
-
-if(millis() - lastUpdate > pInterval) updatePattern(currPattern);
-delay(10);        
+  for(int i=0; i < NUM_LEDS; i++) {
+    neoStrip.setPixelColor(i, Wheel((i+j) & 255));
+  }
+  neoStrip.setBrightness(currBright);
+  neoStrip.show();
+    j++;
+  if(j >= 256) j=0;
+  patternChangeTime = millis(); // time for next change to the display
+ 
 }
+
+void pulsate() {
+  static uint16_t b=0, add=true;
+  if(isReset) {
+    b=0; 
+    isReset=false; 
+    add=true;   //Resets the animation
+  }  
+ 
+  for(int i=0; i<NUM_LEDS; i++) 
+  {
+   neoStrip.fill(currColor, 0, NUM_LEDS);
+  }
+  neoStrip.setBrightness(currBright - b);
+  neoStrip.show();
+
+  if(add) {
+    b++;}
+  else {
+    b--;}
+
+debugSerial.print("b=");
+debugSerial.print(b);
+debugSerial.print(" | currBright =");
+debugSerial.print(currBright);
+debugSerial.print(" | add =");
+debugSerial.print(add);
+debugSerial.print(" | currBright - b=");
+debugSerial.println(currBright - b);
+
+  if((b >= currBright) && add) {
+    b = currBright; 
+    add=false;
+  } 
+  else if((b<=0) && !add) {
+    b=0; 
+    add=true;
+  }
+patternChangeTime=millis();  
+}
+
+
+void wipe(){ // clear all LEDs
+     for(int i=0;i<neoStrip.numPixels();i++){
+       neoStrip.setPixelColor(i, neoStrip.Color(0,0,0,0));
+       }
+}
+
+
+// Fill the dots one after the other with a color
+//void ColorWipe(uint32_t c, uint8_t wait, uint8_t bright, bool rev) 
+void colorWipe() 
+  {
+  static uint16_t i = 0;
+  if(isReset) {
+    i = 0; 
+    isReset=false;    //Resets the animation 
+  }
+
+  if(!revDir)
+    {
+      neoStrip.setPixelColor(i, currColor);
+      neoStrip.setBrightness(currBright);
+      neoStrip.show();
+      i++;
+      if (i >= NUM_LEDS)
+        {
+        i = 0;
+        wipe(); // blank out strip
+        }
+    }
+  else
+    {    
+    // for(uint16_t i=NUM_LEDS; i>0;) 
+    //   {
+      neoStrip.setPixelColor(i-1, currColor);
+      neoStrip.setBrightness(currBright);
+      neoStrip.show();
+      i--;
+      //delay(wait);
+      // }
+      if (i <= 0)
+        {
+        i = NUM_LEDS;
+        wipe(); // blank out strip
+        }      
+    }
+//  delay(wait);    
+  patternChangeTime=millis();
+  }
+
 
 void  UpdatePattern(int pat){ // call the pattern currently being created
   switch(pat) {
@@ -220,29 +225,137 @@ void  UpdatePattern(int pat){ // call the pattern currently being created
         rainbow();
         break;
     case 1:
-        rainbowCycle();
-        break;
-    case 2:
-        theaterChaseRainbow();
-        break;
-    case 3:
-         colorWipe(strip.Color(255, 0, 0)); // red
+         colorWipe();
          break;     
+    case 2:
+         pulsate(); 
+         break;              
   } 
 }
 
 
+
+
+// Adapted from https://www.stm32duino.com/viewtopic.php?t=56#p8160
+unsigned int sqrt32(unsigned long n) {
+  unsigned int c = 0x8000;
+  unsigned int g = 0x8000;
+  while(true) {
+    if(g*g > n) {
+      g ^= c;
+    }
+    c >>= 1;
+    if(c == 0) {
+      return g;
+    }
+    g |= c;
+  }
+}
+
+// Input values 0 to 255 to get color values that transition R->G->B. 0 and 255
+// are the same color. This is based on Adafruit's Wheel() function, which used
+// a linear map that resulted in brightness peaks at 0, 85 and 170. This version
+// uses a quadratic map to make values approach 255 faster while leaving full
+// red or green or blue untouched. For example, Wheel(42) is halfway between
+// red and green. The linear function yielded (126, 129, 0), but this one yields
+// (219, 221, 0). This function is based on the equation the circle centered at
+// (255,0) with radius 255:  (x-255)^2 + (y-0)^2 = r^2
+unsigned long LogWheel(byte position) {
+  byte R = 0, G = 0, B = 0;
+  if (position < 85) {
+    R = sqrt32((1530 - 9 * position) * position);
+    G = sqrt32(65025 - 9 * position * position);
+  } else if (position < 170) {
+    position -= 85;
+    R = sqrt32(65025 - 9 * position * position);
+    B = sqrt32((1530 - 9 * position) * position);
+  } else {
+    position -= 170;
+    G = sqrt32((1530 - 9 * position) * position);
+    B = sqrt32(65025 - 9 * position * position);
+  }
+  return neoStrip.Color(R, G, B);
+}
+
+
+
+// Convert HSL vals to RGB (crude math)
+uint32_t HSLtoPixels(uint16_t hue, uint16_t sat, uint16_t lum) {
+  uint16_t red, grn, blu;
+
+  // Convert hue to a color hexagon value (transition r y g c b m back to r)
+  if(hue < 43) {
+   red=255; grn=hue*6; blu=0;      // R to Y
+  } else if(hue < 85) {
+   hue -= 43;
+   red=255-hue*6; grn=255; blu=0;  // Y to G
+  } else if(hue < 128) {
+   hue -= 85;
+   red=0; grn=255; blu=hue*6;      // G to C
+  } else if(hue < 170) {
+   hue -= 128;
+   red=0; grn=255-hue*6; blu=255;  // C to B
+  } else if(hue < 213) {
+   hue -= 170;
+   red=hue*6; grn=0; blu=255;      // B to M
+  } else {
+   hue -= 213;
+   red=255; grn=0; blu=255-hue*6;  // M to R
+  }
+
+  // Fade wheel RGB toward either white or black, depending on lum value
+  if (lum > 127) {                           // Brighter than 50%?
+    red=(255*(lum-128)+red*(255-lum))/127;   // Elevate colors to white
+    grn=(255*(lum-128)+grn*(255-lum))/127;
+    blu=(255*(lum-128)+blu*(255-lum))/127;
+  }
+  else {                   // Darker than 50%,
+    red = (red*lum)/127;   // Scale colors down to black
+    grn = (grn*lum)/127;
+    blu = (blu*lum)/127;
+  }
+
+  // Fade current RGB toward gray lum value, depending on saturation
+  red=(lum*(255-sat) + red*sat)/255;
+  grn=(lum*(255-sat) + grn*sat)/255;
+  blu=(lum*(255-sat) + blu*sat)/255;
+
+  red=(red*red)>>8;    // Optional: square the RGB for a more pleasing gamma
+  grn=(grn*grn)>>8;
+  blu=(blu*blu)>>8;
+
+  return neoStrip.Color(red, grn, blu);
+}
+
+
+
+uint32_t ColorProfile (int p = 0)
+  {
+  //read color profile from memory ColorProfiles
+  
+  //int ColorProfile[] = ;
+  
+  ColorProfiles[p] = neoStrip.Color(100, 100, 100, 100);
+
+  return ColorProfiles[p];
+  }
+
 // Changes the Color Profile Settings
 void ChangeColorProfile()
-  {
-  static uint32_t savedColor = LogWheel(valHue, valSat, valLum)
+  {    
+  //  int valHue = readChannel(6, 0, 255, 100);       // Channel 6 Pot (VrB)
+  // int valSat = readChannel(6, 0, 255, 100);      // Channel 6 Pot (VrB)
+  // int adjColor = readChannel(6, 0, 255, 100);      // Channel 6 Pot (VrB)
+
+  static uint32_t savedColor = Wheel(valHue);
+
   int selColorValue = readChannel(9, 1000, 2000, 1000);     // Channel 9 Switch (SwC)
   int adjColor = readChannel(6, 0, 255, 100);      // Channel 6 Pot (VrB)
     // clear the palette and set solid color
-  neoStrip.fill(HSLtoPixels(valHue, valSat, valLum), 0, NUM_LEDS);
+  neoStrip.fill(HSLtoPixels(valHue, valSat, currBright), 0, NUM_LEDS);
   neoStrip.show();  
   
-  switch (adjColorVal) 
+  switch (selColorValue) 
     {
     case 1000:    // Select Hue 
       valHue = adjColor;
@@ -337,61 +450,6 @@ void SelectColor()
 
 
 
-// Fill the dots one after the other with a color
-void colorWipe(uint32_t c, uint8_t wait, uint8_t bright, bool rev) 
-  {
-  if(!rev)
-    {
-    for(uint16_t i=0; i<NUM_LEDS;) 
-      {
-      neoStrip.setPixelColor(i, c);
-      neoStrip.setBrightness(bright);
-      neoStrip.show();
-      i++;
-      delay(wait);
-      }      
-    }
-  else
-    {    
-    for(uint16_t i=NUM_LEDS; i>0;) 
-      {
-      neoStrip.setPixelColor(i-1, c);
-      neoStrip.setBrightness(bright);
-      neoStrip.show();
-      i--;
-      delay(wait);
-      }
-    }
-  delay(wait);    
-  }
-
-void wipe(){ // clear all LEDs
-     for(int i=0;i<neoStrip.numPixels();i++){
-       neoStrip.setPixelColor(i, neoStrip.Color(0,0,0));
-       }
-}
-
-
-void colorWipe(uint32_t c, uint8_t bright, bool rev) { // modified from Adafruit example to make it a state machine
-if (!rev) 
-  {
-  static int i = 0;
-  neoStrip.setPixelColor(i, c);
-  neoStrip.setBrightness(bright);    
-  neoStrip.show();
-  i++;
-  if(i >= neoStrip.numPixels()){
-    i = 0;
-    wipe(); // blank out strip
-  }
-else 
-  {
-  static int i =    
-  }
-  lastUpdate = millis(); // time for next change to the display
-}  
-
-
 //// Rainbow Palette
 //void rainbow(uint8_t wait) {
 //  uint16_t i, j;
@@ -482,108 +540,144 @@ void theaterChase(uint32_t c, uint8_t wait, uint8_t gap, uint8_t pixWidth)
 //      }
 //  }
 
-// Input a value 0 to 255 to get a color value.
-// The colours are a transition r - g - b - back to r.
-uint32_t Wheel(byte WheelPos) {
-  WheelPos = 255 - WheelPos;
-  if(WheelPos < 85) {
-    return neoStrip.Color(255 - WheelPos * 3, 0, WheelPos * 3);
-  }
-  if(WheelPos < 170) {
-    WheelPos -= 85;
-    return neoStrip.Color(0, WheelPos * 3, 255 - WheelPos * 3);
-  }
-  WheelPos -= 170;
-  return neoStrip.Color(WheelPos * 3, 255 - WheelPos * 3, 0);
-}
+///////////////////////////////////////////////////////////////////////////////////////////////////////////
+void loop() {
+  currentTime = millis();
+ 
+  currColor = Wheel(100);
 
-// Input values 0 to 255 to get color values that transition R->G->B. 0 and 255
-// are the same color. This is based on Adafruit's Wheel() function, which used
-// a linear map that resulted in brightness peaks at 0, 85 and 170. This version
-// uses a quadratic map to make values approach 255 faster while leaving full
-// red or green or blue untouched. For example, Wheel(42) is halfway between
-// red and green. The linear function yielded (126, 129, 0), but this one yields
-// (219, 221, 0). This function is based on the equation the circle centered at
-// (255,0) with radius 255:  (x-255)^2 + (y-0)^2 = r^2
-unsigned long LogWheel(byte position) {
-  byte R = 0, G = 0, B = 0;
-  if (position < 85) {
-    R = sqrt32((1530 - 9 * position) * position);
-    G = sqrt32(65025 - 9 * position * position);
-  } else if (position < 170) {
-    position -= 85;
-    R = sqrt32(65025 - 9 * position * position);
-    B = sqrt32((1530 - 9 * position) * position);
-  } else {
-    position -= 170;
-    G = sqrt32((1530 - 9 * position) * position);
-    B = sqrt32(65025 - 9 * position * position);
-  }
-  return neoStrip.Color(R, G, B);
-}
+  bool valLock = readChannel(8, true, false, false);        // Channel 8 Switch (SwB)
+  if (!valLock)     // Settings unlocked
+    {
+    currBright = readChannel(6, 0, 255, 0);   // Channel 6 Pot (VrA)
+    // neoStrip.setBrightness(currBright);
 
-// Adapted from https://www.stm32duino.com/viewtopic.php?t=56#p8160
-unsigned int sqrt32(unsigned long n) {
-  unsigned int c = 0x8000;
-  unsigned int g = 0x8000;
-  while(true) {
-    if(g*g > n) {
-      g ^= c;
+    /////////////    Increase or Decrease animation speed by percentage    /////////////
+    
+    int valSpeed = readChannel(2, 1000, 2000, 1500);              // Channel 2 Right Stick (Up/Down)  
+
+    if (valSpeed > 1900 && currSpeed < MAX_SPEED)    //Increase the animation speed
+      {currSpeed = currSpeed + STEP_SPEED;
+      if(currSpeed > MAX_SPEED) currSpeed = MAX_SPEED;
+      delay(200);                                     // debounce delay
+      }
+    else if (valSpeed < 1100 && currSpeed > MIN_SPEED)     //Decrease the animation speed
+      {currSpeed = currSpeed - STEP_SPEED;
+      if(currSpeed <= 0 || currSpeed <= MIN_SPEED) currSpeed = MIN_SPEED;
+      delay(200);                                     // debounce delay
+      }
+    //////////////////////////////
+
+    /////////////    Select pattern    /////////////
+    int valPattern = readChannel(1, 1000, 2000, 1000);  
+    if(valPattern > 1900)
+      {
+      currPattern++;                              // increase pattern number
+      if(currPattern > 2) currPattern = 0;        // wrap round if too high
+      currSpeed = pIntervals[currPattern];        // set speed for this pattern
+      wipe();                                   // clear out the buffer
+      delay(500);                               // debounce delay
+      }
+    else if (valPattern < 1100)
+      {
+      currPattern--;                           // decrease pattern number
+      if(currPattern < 0) currPattern = 2;     // wrap round if too low
+      currSpeed = pIntervals[currPattern];        // set speed for this pattern
+      wipe();                                  // clear out the buffer
+      delay(500);                              //debounce delay
+      }    
+    
+    //pInterval = pIntervals[currPattern] * (currSpeed/100);        // set speed for this pattern      
+    pInterval = currSpeed;        // set speed for this pattern      
+    //////////////////////////////////////////////////////////////////////////////////////////      
+
+    // // Color Palette Selection
+    // switch (currPattern) {
+    //   case 0:   // Solid  
+    
+    //   case 1:   // Color Wipe
+    //       colorWipe(ColorProfiles[currColor], valSpeed, currBright, revDir);    //Wipe color
+    //       colorWipe(neoStrip.Color(0,0,0), valSpeed, currBright, revDir);    //Wipe black
+    //     break;
+        
+    //   case 2:
+    //     // Chase
+    //     // rainbow cycle here
+    //     break;
+        
+    //   case 3:      // Larson Scanner Animation 
+    //     if (enableMidOut)   // Use middle out animation order
+    //       {    
+    //       // run larson scanner w/middle out
+    //       }
+
+    //     else   // Use left/right animation order
+    //       {
+    //       // run larson scanner
+    //       }
+    //     break;
+    //   }  
     }
-    c >>= 1;
-    if(c == 0) {
-      return g;
+  else
+    {
+
     }
-    g |= c;
+  
+
+
+
+  ////////////////////////////// Standby / Resume //////////////////////////////
+  int valStandby = readChannel(7, 1000, 2000, 2000);    // Channel 7 Switch (SwA)
+  int setColor = readChannel(10, 1000, 2000, 1000);      // Channel 10 Switch (SwD) - Allows the color to be set
+  
+  if (valStandby > 1900 && setColor < 1900)    //Standby enabled
+    {
+    neoStrip.fill(0,0,NUM_LEDS);    //Turn off all LEDs
+    neoStrip.show();
+    currentTime = millis();
+    isReset = true;
+    }
+  else if (valStandby < 1100 && setColor < 1900)     //Resume animation/display
+    {
+    if(currentTime - patternChangeTime > pInterval) UpdatePattern(currPattern);
+    }
+// debugSerial.print("currColor: ");
+// debugSerial.print(currColor);    
+// debugSerial.print("currBright: ");
+// debugSerial.print(currBright);    
+// debugSerial.print("currSpeed: ");
+// debugSerial.print(currSpeed);
+// debugSerial.print(" pInterval: ");
+// debugSerial.print(pInterval);
+// debugSerial.print(" currPattern: ");
+// debugSerial.println(currPattern);
+//////////////////////////////////////////////////////////////////////////////////////////
+
+/////////////////////////////// Set Color Profile ///////////////////////////////
+if (setColor > 1900)
+  {
+// Set Color
   }
+
+
+
+///////////////////////////////////////////////
+
+/////////////////Ignore for now
+
+
+// --- Debugging example below --- 
+//  for (byte i = 1; i<=10; i++){
+//    int value = readChannel(i, 1000, 2000, 1000);
+//    debugSerial.print("Ch");
+//    debugSerial.print(i);
+//    debugSerial.print(": ");
+//    debugSerial.print(value);
+//    debugSerial.print(" ");
+//  }
+
+
+
+delay(10);        
 }
 
-
-
-// Convert HSL vals to RGB (crude math)
-uint32_t HSLtoPixels(uint16_t hue, uint16_t sat, uint16_t lum) {
-  uint16_t red, grn, blu;
-
-  // Convert hue to a color hexagon value (transition r y g c b m back to r)
-  if(hue < 43) {
-   red=255; grn=hue*6; blu=0;      // R to Y
-  } else if(hue < 85) {
-   hue -= 43;
-   red=255-hue*6; grn=255; blu=0;  // Y to G
-  } else if(hue < 128) {
-   hue -= 85;
-   red=0; grn=255; blu=hue*6;      // G to C
-  } else if(hue < 170) {
-   hue -= 128;
-   red=0; grn=255-hue*6; blu=255;  // C to B
-  } else if(hue < 213) {
-   hue -= 170;
-   red=hue*6; grn=0; blu=255;      // B to M
-  } else {
-   hue -= 213;
-   red=255; grn=0; blu=255-hue*6;  // M to R
-  }
-
-  // Fade wheel RGB toward either white or black, depending on lum value
-  if (lum > 127) {                           // Brighter than 50%?
-    red=(255*(lum-128)+red*(255-lum))/127;   // Elevate colors to white
-    grn=(255*(lum-128)+grn*(255-lum))/127;
-    blu=(255*(lum-128)+blu*(255-lum))/127;
-  }
-  else {                   // Darker than 50%,
-    red = (red*lum)/127;   // Scale colors down to black
-    grn = (grn*lum)/127;
-    blu = (blu*lum)/127;
-  }
-
-  // Fade current RGB toward gray lum value, depending on saturation
-  red=(lum*(255-sat) + red*sat)/255;
-  grn=(lum*(255-sat) + grn*sat)/255;
-  blu=(lum*(255-sat) + blu*sat)/255;
-
-  red=(red*red)>>8;    // Optional: square the RGB for a more pleasing gamma
-  grn=(grn*grn)>>8;
-  blu=(blu*blu)>>8;
-
-  return neoStrip.Color(red, grn, blu);
-}
