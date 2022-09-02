@@ -14,15 +14,10 @@ SwC - Animation Type (Color Wipe / Cylon / Solid)
 SwD - Linear Blend (Enable / Disable)
 
 
-
 Wheel Position Input
 absolute position percentage of 255
 
-
-
 output 255,255,255,255
-
-
 
 
 SwD (high): Adjust Selected Color Profile

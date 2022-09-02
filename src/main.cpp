@@ -43,7 +43,9 @@ bool midOut = false;    //Middle-Out
 int currSpeed = 50;    //Default value
 bool isReset = false;   //Reset animation flag
 
-uint32_t ColorProfiles[3];  // store color profile info
+int pixWidth = 1; //
+
+//uint32_t ColorProfiles[3];  // store color profile info
 
 // New vars for non-blocking patterns
 unsigned long pInterval = 20 ; // Default delay time between steps in the pattern (milliseconds)
@@ -54,7 +56,7 @@ unsigned long currentTime = millis();  //the current value of millis()
 unsigned long patternChangeTime = 0; //time of the last change of pattern occured
 int patternTime;  // used to store the pattern's time frequency
 
-Adafruit_NeoPixel neoStrip = Adafruit_NeoPixel(NUM_LEDS, LED_PIN, NEO_RGBW + NEO_KHZ800);    // Init neoStrip NeoPixel Object
+Adafruit_NeoPixel neoStrip = Adafruit_NeoPixel(NUM_LEDS, LED_PIN, NEO_GRBW + NEO_KHZ800);    // Init neoStrip NeoPixel Object
 
 ////CRGB leds[NUM_LEDS]; // FastLED Library Init
 //CRGBPalette16 currentPalette;
@@ -85,6 +87,35 @@ void setup() {
   pinMode(LED_PIN, OUTPUT); // Set RGB strip pin to an OUTPUT
 }
 
+// class ColorProfile {
+//   public:
+//     SetColor();
+
+//   private:
+//     int lastChange;
+// };
+
+// ColorProfile::SetColor()
+// {
+ 
+ 
+// }
+
+struct Control
+{
+  int  channel;   // RC Channel
+  int  minValue;  // Minimum channel value
+  int  maxValue;  // Maximum channel value
+  int  lastRead;  // Last channel value received
+  int  defaultValue;  // Default channel value
+  // int  low;
+  // int  high;
+  // int  status; // 0=off;1=on
+  // int  toggle; // 0=nochange; 1=turnedon; 2=turnedoff; 3=malfunction
+  int  timer;  // seconds since last status change
+  // struct Thermistor Therm; // Thermistor
+};
+
 // Read the number of a given channel and convert to the range provided.
 // If the channel is off, return the default value
 int readChannel(byte channelInput, int minLimit, int maxLimit, int defaultValue){
@@ -109,7 +140,7 @@ uint32_t Wheel(byte WheelPos) {
   return neoStrip.Color(WheelPos * 3, 255 - WheelPos * 3, 0);
 }
 
-
+//////////////////////// Rainbow Animation ////////////////////////////
 void rainbow() { // modified from Adafruit example to make it a state machine
   static uint16_t j=0;
   if(isReset) {
@@ -128,6 +159,7 @@ void rainbow() { // modified from Adafruit example to make it a state machine
  
 }
 
+//////////////////////// Pulsate Animation ////////////////////////////
 void pulsate() {
   static uint16_t b=0, add=true;
   if(isReset) {
@@ -148,14 +180,14 @@ void pulsate() {
   else {
     b--;}
 
-debugSerial.print("b=");
-debugSerial.print(b);
-debugSerial.print(" | currBright =");
-debugSerial.print(currBright);
-debugSerial.print(" | add =");
-debugSerial.print(add);
-debugSerial.print(" | currBright - b=");
-debugSerial.println(currBright - b);
+// debugSerial.print("b=");
+// debugSerial.print(b);
+// debugSerial.print(" | currBright =");
+// debugSerial.print(currBright);
+// debugSerial.print(" | add =");
+// debugSerial.print(add);
+// debugSerial.print(" | currBright - b=");
+// debugSerial.println(currBright - b);
 
   if((b >= currBright) && add) {
     b = currBright; 
@@ -168,58 +200,112 @@ debugSerial.println(currBright - b);
 patternChangeTime=millis();  
 }
 
-
+//////////////////////// Clear LEDs ////////////////////////////
 void wipe(){ // clear all LEDs
-     for(int i=0;i<neoStrip.numPixels();i++){
-       neoStrip.setPixelColor(i, neoStrip.Color(0,0,0,0));
-       }
+  for(int i=0;i<neoStrip.numPixels();i++){
+    neoStrip.setPixelColor(i, neoStrip.Color(0,0,0,0));
+    }
+  neoStrip.show();
 }
 
 
+//////////////////////// Color Wipe Animation ////////////////////////////
 // Fill the dots one after the other with a color
-//void ColorWipe(uint32_t c, uint8_t wait, uint8_t bright, bool rev) 
-void colorWipe() 
-  {
+void colorWipe() {
   static uint16_t i = 0;
   if(isReset) {
     i = 0; 
     isReset=false;    //Resets the animation 
   }
 
-  if(!revDir)
-    {
-      neoStrip.setPixelColor(i, currColor);
-      neoStrip.setBrightness(currBright);
-      neoStrip.show();
-      i++;
-      if (i >= NUM_LEDS)
-        {
-        i = 0;
-        wipe(); // blank out strip
-        }
+  if(!revDir) {
+    neoStrip.setPixelColor(i, currColor);
+    neoStrip.setBrightness(currBright);
+    neoStrip.show();
+    i++;
+    if (i >= NUM_LEDS) {
+      i = 0;
+      wipe(); // blank out strip
     }
-  else
-    {    
-    // for(uint16_t i=NUM_LEDS; i>0;) 
-    //   {
-      neoStrip.setPixelColor(i-1, currColor);
-      neoStrip.setBrightness(currBright);
-      neoStrip.show();
-      i--;
-      //delay(wait);
-      // }
-      if (i <= 0)
-        {
-        i = NUM_LEDS;
-        wipe(); // blank out strip
-        }      
-    }
-//  delay(wait);    
-  patternChangeTime=millis();
   }
+  else {    
+    neoStrip.setPixelColor(i-1, currColor);
+    neoStrip.setBrightness(currBright);
+    neoStrip.show();
+    i--;
 
+    if (i <= 0) {
+      i = NUM_LEDS;
+      wipe(); // blank out strip
+    }      
+  }
+  patternChangeTime=millis();
+}
 
-void  UpdatePattern(int pat){ // call the pattern currently being created
+//////////////////////// Theater Chase Animation ////////////////////////////
+// //Theatre-style crawling lights.
+// void theaterChase(uint32_t c, uint8_t wait, uint8_t gap, uint8_t pixWidth) {
+//   //for (int j=0; j<10; j++) //do 10 cycles of chasing
+// //    {  
+//   static int q=0, i=0, w=0;
+
+//     //for (int q=0; q < gap; q++) 
+//  //     {
+//    if(q < gap) {
+//       // for (uint16_t i=0; i < NUM_LEDS; i=i+gap) 
+//       //   {
+//       if(i<NUM_LEDS) {
+//         for (uint8_t w=0; w < pixWidth; w++){          
+//           neoStrip.setPixelColor(i+q+w, c);    //turn every n'th pixel on (n=gap)
+//         }
+//           i=i+gap;
+//       }
+//       neoStrip.show();
+
+//       //delay(wait);
+
+//       for (uint16_t i=0; i < neoStrip.numPixels(); i=i+gap)
+//         {
+//         for (uint8_t w=0; w < pixWidth; w++)
+//           {
+//           neoStrip.setPixelColor(i+q+w, 0);        //turn every n'th set of pixel(s) off (n=gap)  
+//           }
+//         }       
+      
+//     q++
+//   }
+//   else {
+//     q=0
+//   }
+// //    }
+// //  }
+void theaterChase() {
+  static int j=0, q = 0;
+  static boolean on = true;   //to toggle pixel on/off
+  
+  if(on){     // turn pixel on
+    for (int i=0; i < neoStrip.numPixels(); i=i+3) {
+      neoStrip.setPixelColor(i+q, currColor);    //turn every third pixel on
+    }
+  }
+  else {      // turn pixel off
+    for (int i=0; i < neoStrip.numPixels(); i=i+3) {
+      neoStrip.setPixelColor(i+q, 0);        //turn every third pixel off
+    }
+  }
+    on = !on; // toggle pixels on or off for next time
+    neoStrip.show();
+    q++; // advance the pixel q variable
+
+    if(q >=3 ){ // if it overflows reset it and update the J variable
+      q=0;
+      j++;
+      if(j >= 256) j = 0;
+    }
+  patternChangeTime = millis(); // time for next change to the display   
+}
+//////////////////////// Update Pattern ////////////////////////////
+void  UpdatePattern(int pat) { // call the pattern currently being created
   switch(pat) {
     case 0:
         rainbow();
@@ -327,48 +413,77 @@ uint32_t HSLtoPixels(uint16_t hue, uint16_t sat, uint16_t lum) {
   return neoStrip.Color(red, grn, blu);
 }
 
+// Struct info - https://forum.arduino.cc/index.php?topic=42681.0
+struct ColorProfile{
+   int red;
+   int green;
+   int blue;
+   int white;
+};
 
-
-uint32_t ColorProfile (int p = 0)
-  {
-  //read color profile from memory ColorProfiles
+// uint32_t ColorProfile (int p = 0)
+//   {
+//   //read color profile from memory ColorProfiles
   
-  //int ColorProfile[] = ;
+//   //int ColorProfile[] = ;
   
-  ColorProfiles[p] = neoStrip.Color(100, 100, 100, 100);
+//   ColorProfiles[p] = neoStrip.Color(100, 100, 100, 100);
 
-  return ColorProfiles[p];
-  }
+//   return ColorProfiles[p];
+//   }
 
 // Changes the Color Profile Settings
-void ChangeColorProfile()
+void AdjustColorProfile()
   {    
   //  int valHue = readChannel(6, 0, 255, 100);       // Channel 6 Pot (VrB)
   // int valSat = readChannel(6, 0, 255, 100);      // Channel 6 Pot (VrB)
   // int adjColor = readChannel(6, 0, 255, 100);      // Channel 6 Pot (VrB)
 
-  static uint32_t savedColor = Wheel(valHue);
+  //static uint32_t savedColor = Wheel(valHue);
 
   int selColorValue = readChannel(9, 1000, 2000, 1000);     // Channel 9 Switch (SwC)
-  int adjColor = readChannel(6, 0, 255, 100);      // Channel 6 Pot (VrB)
-    // clear the palette and set solid color
-  neoStrip.fill(HSLtoPixels(valHue, valSat, currBright), 0, NUM_LEDS);
-  neoStrip.show();  
+  int adjWhite = readChannel(5, 0, 255, 100);      // Channel 5 Pot (VrA)
+  //int adjColor = readChannel(6, 0, 255, 100);      // Channel 6 Pot (VrB)
+  int adjColor = readChannel(2, 1000, 2000, 1000);      // Channel 2 Right Stick (up/down)
+
+  // clear the palette and set solid color
+  static ColorProfile c;
+  //c.red = 50;
+  //c.green = 50;
+  //c.blue = 50;
   
+  // debugSerial.print("Channel 2: ");
+  // debugSerial.println(adjColor);
+  //static ColorProfile tC;
+  
+  //neoStrip.fill(HSLtoPixels(valHue, valSat, currBright), 0, NUM_LEDS); 
   switch (selColorValue) 
     {
-    case 1000:    // Select Hue 
-      valHue = adjColor;
+    case 1000:    // Select red
+      //c.red = adjColor;
+      if((adjColor > 1900) && (c.red < 255)) {c.red++; delay(100);}     //go up
+      else if((adjColor < 1100) && (c.red > 0)) {c.red--; delay(100);}  //go down
       break;
     case 1500:    // Select Saturation
-      valSat = adjColor;
+      //c.green = adjColor;
+      if((adjColor > 1900) && (c.green < 255)) {c.green++; delay(100);}     //go up
+      else if((adjColor < 1100) && (c.green > 0)) {c.green--; delay(100);}  //go down
       break;
     case 2000:    // Select Luminosity 
-      valWhite = adjColor;
+      //c.blue = adjColor;
+      if((adjColor > 1900) && (c.blue < 255)) {c.blue++; delay(100);}       //go up
+      else if((adjColor < 1100) && (c.blue > 0)) {c.blue--; delay(100);}     //go down      
       break;
     }    
 
+  c.white = adjWhite;
+  
+  int color = neoStrip.Color(c.red, c.green, c.blue, c.white);
+  neoStrip.fill(color,0,NUM_LEDS);
+  neoStrip.show();  
+
   delay(10);
+  //return
   }
 
 // Saves Color Profile
@@ -476,34 +591,7 @@ void SelectColor()
 //  }
 //}
 
-//Theatre-style crawling lights.
-void theaterChase(uint32_t c, uint8_t wait, uint8_t gap, uint8_t pixWidth) 
-  {
-  for (int j=0; j<10; j++) //do 10 cycles of chasing
-    {  
-    for (int q=0; q < gap; q++) 
-      {
-      for (uint16_t i=0; i < neoStrip.numPixels(); i=i+gap) 
-        {
-        for (uint8_t w=0; w < pixWidth; w++)
-          {          
-          neoStrip.setPixelColor(i+q+w, c);    //turn every n'th pixel on (n=gap)
-          }
-        }
-      neoStrip.show();
 
-      delay(wait);
-
-      for (uint16_t i=0; i < neoStrip.numPixels(); i=i+gap)
-        {
-        for (uint8_t w=0; w < pixWidth; w++)
-          {
-          neoStrip.setPixelColor(i+q+w, 0);        //turn every n'th set of pixel(s) off (n=gap)  
-          }
-        }       
-      }
-    }
-  }
 
 //Theatre-style crawling lights with rainbow effect 
 //// - Add pixel width
@@ -544,7 +632,14 @@ void theaterChase(uint32_t c, uint8_t wait, uint8_t gap, uint8_t pixWidth)
 void loop() {
   currentTime = millis();
  
-  currColor = Wheel(100);
+  currColor = 
+  Wheel(100);
+
+  // ColorProfile cP;
+  // cP.red = 12;
+  // cP.green = 50;
+  // cP.blue = 70;
+  // cP.white = 100;
 
   bool valLock = readChannel(8, true, false, false);        // Channel 8 Switch (SwB)
   if (!valLock)     // Settings unlocked
@@ -554,7 +649,7 @@ void loop() {
 
     /////////////    Increase or Decrease animation speed by percentage    /////////////
     
-    int valSpeed = readChannel(2, 1000, 2000, 1500);              // Channel 2 Right Stick (Up/Down)  
+    int valSpeed = readChannel(2, 2000, 1000, 1500);              // Channel 2 Right Stick (Up/Down)  
 
     if (valSpeed > 1900 && currSpeed < MAX_SPEED)    //Increase the animation speed
       {currSpeed = currSpeed + STEP_SPEED;
@@ -569,22 +664,24 @@ void loop() {
     //////////////////////////////
 
     /////////////    Select pattern    /////////////
-    int valPattern = readChannel(1, 1000, 2000, 1000);  
+    int valPattern = readChannel(1, 1000, 2000, 1500);  // Ch 1 Right Stick (left/right)
     if(valPattern > 1900)
       {
       currPattern++;                              // increase pattern number
-      if(currPattern > 2) currPattern = 0;        // wrap round if too high
+      if(currPattern > 2) {currPattern = 0;}        // wrap round if too high
       currSpeed = pIntervals[currPattern];        // set speed for this pattern
       wipe();                                   // clear out the buffer
-      delay(500);                               // debounce delay
+      isReset = true;
+      delay(200);                               // debounce delay
       }
     else if (valPattern < 1100)
       {
       currPattern--;                           // decrease pattern number
-      if(currPattern < 0) currPattern = 2;     // wrap round if too low
+      if(currPattern < 0) {currPattern = 2;}     // wrap round if too low
       currSpeed = pIntervals[currPattern];        // set speed for this pattern
       wipe();                                  // clear out the buffer
-      delay(500);                              //debounce delay
+      isReset = true;
+      delay(200);                              //debounce delay
       }    
     
     //pInterval = pIntervals[currPattern] * (currSpeed/100);        // set speed for this pattern      
@@ -627,17 +724,17 @@ void loop() {
 
 
   ////////////////////////////// Standby / Resume //////////////////////////////
-  int valStandby = readChannel(7, 1000, 2000, 2000);    // Channel 7 Switch (SwA)
+  int valStandby = readChannel(7, 1000, 2000, 1000);    // Channel 7 Switch (SwA)
   int setColor = readChannel(10, 1000, 2000, 1000);      // Channel 10 Switch (SwD) - Allows the color to be set
   
-  if (valStandby > 1900 && setColor < 1900)    //Standby enabled
+  if ((valStandby > 1900) && (setColor < 1900))    //Standby enabled
     {
     neoStrip.fill(0,0,NUM_LEDS);    //Turn off all LEDs
     neoStrip.show();
     currentTime = millis();
     isReset = true;
     }
-  else if (valStandby < 1100 && setColor < 1900)     //Resume animation/display
+  else if ((valStandby < 1100) && (setColor < 1900))     //Resume animation/display
     {
     if(currentTime - patternChangeTime > pInterval) UpdatePattern(currPattern);
     }
@@ -657,6 +754,7 @@ void loop() {
 if (setColor > 1900)
   {
 // Set Color
+  AdjustColorProfile();
   }
 
 
@@ -678,6 +776,6 @@ if (setColor > 1900)
 
 
 
-delay(10);        
+delay(10);       
 }
 
